@@ -1,0 +1,4 @@
+# SANDBOX CODEOWNERS - throwaway equivalent of the real wiring.
+# Same semantics: gated paths require a code-owner review.
+sandbox-matrix.json   @dakuwonmoody-lab
+protected/            @dakuwonmoody-lab
