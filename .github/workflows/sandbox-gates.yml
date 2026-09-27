@@ -11,4 +11,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: pip install -q pytest
       - run: python3 -m pytest test_gate.py -q
