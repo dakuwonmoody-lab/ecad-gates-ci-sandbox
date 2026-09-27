@@ -1,0 +1,98 @@
+# Sandbox CI for the Gate-12 proof (SANDBOX ONLY - throwaway).
+#
+# Translated from the proposed ci-gates.yml: same semantics, reduced scale.
+# Job `name`s are the REQUIRED STATUS CHECK contexts named in the sandbox
+# ruleset (exact match). Three jobs stand in for the six real ones:
+#   sandbox/schema-validation   <- ecad/schema-validation
+#   sandbox/pytest              <- ecad/pytest-linux + ecad/validator
+#   sandbox/protected-paths-guard <- ecad/protected-paths-guard
+# (ecad/byte-verification, ecad/adversarial-review-pass are documented in
+# the real lane; their semantics are represented here by schema-validation
+# and the paths guard respectively.)
+
+name: sandbox-gates
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SENSITIVE_PATHS_LABEL: owner-approved-sensitive-path
+
+jobs:
+  schema-validation:
+    name: sandbox/schema-validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate acceptance matrix (stdlib only)
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          rows = json.load(open("sandbox-matrix.json"))
+          rows = rows if isinstance(rows, list) else rows.get("rows", [])
+          REQUIRED = {"id", "item", "status", "source_revision", "next"}
+          STATUS = {"VERIFIED", "FAILED", "BLOCKED", "NOT TESTED"}
+          fails = []
+          for i, row in enumerate(rows):
+              missing = REQUIRED - set(row)
+              if missing:
+                  fails.append(f"row[{i}]: missing fields {sorted(missing)}")
+              if row.get("status") not in STATUS:
+                  fails.append(f"row[{i}] ({row.get('id')}): bad status "
+                               f"{row.get('status')!r}")
+          if fails:
+              print("\n".join(fails))
+              sys.exit(1)
+          print(f"OK: {len(rows)} rows validated")
+          PY
+
+  pytest:
+    name: sandbox/pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pinned deps
+        run: pip install "pytest==8.3.4"
+      - name: Run sandbox tests
+        run: python -m pytest test_sandbox.py -q
+
+  protected-paths-guard:
+    name: sandbox/protected-paths-guard
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: sensitive
+        with:
+          filters: |
+            protected:
+              - 'protected/**'
+      - name: Enforce owner-approval label for protected paths
+        run: |
+          sensitive='${{ steps.sensitive.outputs.changes }}'
+          echo "changed groups: $sensitive"
+          if [ "$sensitive" != '[]' ] && [ "$sensitive" != '' ]; then
+            labels='${{ toJson(github.event.pull_request.labels.*.name) }}'
+            case "$labels" in
+              *"$SENSITIVE_PATHS_LABEL"*) echo "OK: owner approval label present" ;;
+              *) echo "ERROR: this PR touches protected/ but lacks label '$SENSITIVE_PATHS_LABEL'" >&2; exit 1 ;;
+            esac
+          else
+            echo "OK: no protected paths touched"
+          fi
