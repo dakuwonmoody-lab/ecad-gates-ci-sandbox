@@ -1,0 +1,3 @@
+simulated sensitive artifact - PRs touching this directory require the
+owner-approved-sensitive-path label (sandbox equivalent of lib/, saved
+designs, handoffs/).
